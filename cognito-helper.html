@@ -1,0 +1,210 @@
+<script src="../amazon-cognito-identity-js/dist/aws-cognito-sdk.min.js"></script>
+<script src="../amazon-cognito-identity-js/dist/amazon-cognito-identity.min.js"></script>
+<link rel="import" href="../polymer/polymer-element.html">
+<link rel="import" href="../paper-input/paper-input.html">
+<link rel="import" href="../paper-button/paper-button.html">
+<link rel="import" href="../paper-card/paper-card.html">
+<link rel="import" href="../paper-toast/paper-toast.html">
+
+<dom-module id="cognito-helper">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+    </style>
+    <paper-card heading="[[authWelcome]]" id="cognito-container">
+      <div class="card-content">
+        <paper-input value="{{username}}" label="Username" type="text"></paper-input>
+        <paper-input value="{{password}}" label="[[_getPasswordLabel(passwordResetRequired)]]" type="password"></paper-input>
+        <paper-input hidden$="[[!passwordResetRequired]]" value="{{newPassword}}" label="New Password" type="password"></paper-input>
+        <paper-input hidden$="[[!passwordResetRequired]]" value="{{confirmPassword}}" label="Confirm Password" type="password"></paper-input>
+      </div>
+      <div class="card-actions">
+        <paper-button disabled$="[[!_validUserAndPassword(username,password,newPassword,confirmPassword,passwordResetRequired)]]" on-tap="authenticate">Login</paper-button>
+      </div>
+    </paper-card>
+  </template>
+
+  <script>
+    /**
+     * `cognito-helper`
+     * 
+     *
+     * @customElement
+     * @polymer
+     * @demo demo/index.html
+     */
+    class CognitoHelper extends Polymer.Element {
+      static get is() { return 'cognito-helper'; }
+      static get properties() {
+        return {
+          userPoolId: String,
+          clientId: String,
+          authWelcome: String,
+          userPool: Object,
+          cognitoUser: {
+            type: Object,
+            notify: true
+          },
+          apiHeaders: {
+            type: Object,
+            value: {},
+            notify: true
+          },  
+          loggedIn: {
+            type: Boolean,
+            value: false,
+            notify: true
+          },
+          passwordResetRequired: {
+            type: Boolean,
+            value: false
+          },
+          username: {
+            type: String,
+            value: ''
+          },
+          password: {
+            type: String,
+            value: ''
+          },
+          newPassword: {
+            type: String,
+            value: ''
+          },
+          confirmPassword: {
+            type: String,
+            value: ''
+          }
+        };
+      }
+
+      ready() {
+        super.ready();
+        var poolData= {
+          'UserPoolId': this.userPoolId,
+          'ClientId': this.clientId
+        };
+        this.userPool = new AWSCognito.CognitoIdentityServiceProvider.CognitoUserPool(poolData);
+        this.retrieveUser()
+      }
+
+      retrieveUser() {
+        this.cognitoUser = this.userPool.getCurrentUser();
+        var that = this;
+        if (this.cognitoUser != null) {
+            this.cognitoUser.getSession(function(err, session) {
+                if (err) {
+                    return;
+                }
+                if (session.isValid()) {
+                  that._setHeaders(session.getIdToken().getJwtToken())
+                  that.loggedIn = true;
+                }
+            });
+        }
+      }
+
+      logout() {
+        if (this.cognitoUser != null) {
+          this.cognitoUser.signOut();
+          this._setHeaders();
+          this.loggedIn = false;
+        }
+      }
+
+      authenticate() {
+        var userData = {
+            'Username': this.username,
+            'Pool': this.userPool
+        };
+        var authenticationData = {
+          'Username': this.username,
+          'Password': this.password
+        }
+
+        var authenticationDetails = new AWSCognito.CognitoIdentityServiceProvider.AuthenticationDetails(authenticationData);
+        this.cognitoUser = new AWSCognito.CognitoIdentityServiceProvider.CognitoUser(userData);
+        var that = this;
+        this.cognitoUser.authenticateUser(authenticationDetails , {
+          onSuccess: function(result) {
+              that._setHeaders(that.cognitoUser.getSignInUserSession().getIdToken().getJwtToken());
+              that.loggedIn = true;
+              that._clearAll();
+          },
+
+          onFailure: function(err) {
+              console.log('auth failed')
+              console.log(err)
+              that._clearPasswords();
+          },
+
+          newPasswordRequired: function(userAttributes, requiredAttributes) {
+              // User was signed up by an admin and must provide new 
+              // password and required attributes, if any, to complete 
+              // authentication.
+
+              // userAttributes: object, which is the user's current profile. It will list all attributes that are associated with the user. 
+              // Required attributes according to schema, which don’t have any values yet, will have blank values.
+              // requiredAttributes: list of attributes that must be set by the user along with new password to complete the sign-in.
+
+              
+              // Get these details and call 
+              // newPassword: password that user has given
+              // attributesData: object with key as attribute name and value that the user has given.
+              if (that.passwordResetRequired) {
+                delete userAttributes.email_verified;
+                if (that.newPassword === that.confirmPassword)
+                try {
+                  that.cognitoUser.completeNewPasswordChallenge(that.newPassword, userAttributes, that)
+                }
+                catch(err) {
+                  console.log(err);
+                }
+              }
+              else {
+                that._clearPasswords();
+                that.passwordResetRequired = true;
+              }
+          }
+        });       
+      }
+
+      _setHeaders(session) {
+        if (sesh) {
+          this.apiHeaders = {
+            'Authorization': session
+          }
+        }
+        else this.apiHeaders = {}
+      }
+
+      _clearPasswords() {
+        this.password = "";
+        this.newPassword = "";
+        this.confirmPassword = "";
+      }
+
+      _clearAll() {
+        this.username = "";
+        this._clearPasswords();
+        this.passwordResetRequired = false;
+      }
+
+      _getPasswordLabel() {
+        return (this.passwordResetRequired) ? "Old Password" : "Password"
+      }
+
+      _validUserAndPassword(u,p,np,cp,prr) {
+        if (this.passwordResetRequired) {
+          return u !== "" && p !== "" && np !== "" && cp !== ""
+        }
+        return u !== "" && p !== ""
+      }
+
+    }
+
+    window.customElements.define(CognitoHelper.is, CognitoHelper);
+  </script>
+</dom-module>
