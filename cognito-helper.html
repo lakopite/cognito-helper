@@ -135,8 +135,7 @@
           },
 
           onFailure: function(err) {
-              console.log('auth failed')
-              console.log(err)
+              that.dispatchEvent(new CustomEvent('authFailure', {bubbles: true, composed: true}))
               that._clearPasswords();
           },
 
